@@ -2,15 +2,19 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
 
-async function bootstrap() {
+async function bootstrap() { // ฟังก์ชันหลักในการเริ่มต้นแอปพลิเคชัน NestJS
   const app = await NestFactory.create(AppModule);
+  // open cors
   app.enableCors();
+  app.use(helmet());
+  // use global validation pipe
   app.useGlobalPipes(
-    new ValidationPipe({ // การตั้งค่าสำหรับการตรวจสอบข้อมูลขาเข้า
-      whitelist: true, // ลบคุณสมบัติที่ไม่ได้ระบุไว้ใน DTO ออก
-      forbidNonWhitelisted: true, // แจ้งข้อผิดพลาดหากมีคุณสมบัติที่ไม่ได้ระบุไว้ใน DTO
-      transform: true, // แปลงข้อมูลขาเข้าให้ตรงกับประเภทที่กำหนดใน DTO
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
     }),
   );
   await app.listen(process.env.PORT ?? 3000);

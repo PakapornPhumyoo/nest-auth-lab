@@ -4,22 +4,26 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 
-type JwtPayload = { sub: string; email: string };   //โครงสร้างข้อมูลภายใน JWT
-// JWT คือ JSON Web Token ซึ่งใช้สำหรับการยืนยันตัวตนและการแลกเปลี่ยนข้อมูลอย่างปลอดภัยระหว่างฝ่ายต่างๆ
+// type JwtPayload = { sub: string; email: string };
+type JwtPayload = { sub: string; email: string; role: string };
 
-@Injectable() 
-export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') { 
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     constructor(config: ConfigService) {
         super({
-            jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(), // ดึง JWT จากส่วนหัวของคำขอ HTTP
-            ignoreExpiration: false, // ไม่ละเว้นการหมดอายุของ JWT
-            secretOrKey: config.get<string>('JWT_SECRET') || '', // ใช้คีย์ลับจากการตั้งค่าเพื่อยืนยันความถูกต้องของ JWT 
+	     // อ่าน Authorization: Bearer <access_token> จาก request
+            jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+            ignoreExpiration: false,
+            // secretOrKey: config.get<string>('JWT_SECRET') || '',
+            secretOrKey: config.get<string>('JWT_ACCESS_SECRET') || '',
         });
     }
 
-    validate(payload: JwtPayload) { //ตรวจสอบความถูกต้องของ JWT
-        return { userId: payload.sub, email: payload.email }; //ส่งคืนข้อมูลผู้ใช้ที่ตรวจสอบแล้ว
-        //จะเจอข้อมูล userId และ email 
+    validate(payload: JwtPayload) {
+        // return { userId: payload.sub, email: payload.email };
+        return { userId: payload.sub, email: payload.email, role: payload.role };
     }
 }
 
+
+ 

@@ -3,17 +3,21 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 
 export type UserDocument = HydratedDocument<User>;
+export type UserRole = 'user' | 'admin';  // สามารถกำหนดประเภทผู้ใช้ในฐานข้อมูลได้
 
 @Schema({ timestamps: true })
 export class User {
     @Prop({ required: true, unique: true, lowercase: true, trim: true, index: true })
-    email: string; //firld for user email
-                   // unique คือไม่ให้มี email ซ้ำกัน 
+    email: string;
 
     @Prop({ required: true, select: false })
-    passwordHash: string; //field for hashed password
-                          // required คือ ต้องมีค่า ห้ามว่าง 
-                          // select: false คือ ไม่ให้แสดง field นี้เมื่อดึงข้อมูล user
+    passwordHash: string;
+
+    @Prop({ required: true, default: 'user' })
+    role: UserRole;
+    
+     @Prop({ type: String, select: false, default: null })
+    refreshTokenHash?: string | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

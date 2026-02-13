@@ -8,25 +8,26 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { RefreshStrategy } from './strategies/refresh.strategy';
 
-@Module({ 
+@Module({
   imports: [
     UsersModule,
     PassportModule,
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: async (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET'),
-        signOptions: {
-          expiresIn: parseInt(config.get<string>('JWT_EXPIRATION') ?? '5', 10), // ระยะเวลาหมดอายุของโทเค็น (วินาที)
-        },
-      }),
-    }),
+    JwtModule.register({}),
+    // JwtModule.registerAsync({
+    //   imports: [ConfigModule],
+    //   inject: [ConfigService],
+    //   useFactory: async (config: ConfigService) => ({
+    //     secret: config.get<string>('JWT_SECRET'),
+    //     signOptions: {
+    //       expiresIn: parseInt(config.get<string>('JWT_EXPIRATION') ?? '3600', 10),
+    //     },
+    //   }),
+    // }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, RefreshStrategy], 
 })
 export class AuthModule { }
-
 

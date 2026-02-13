@@ -1,57 +1,111 @@
-// src/auth/auth.service.ts // จัดการการลงทะเบียนและการเข้าสู่ระบบผู้ใช้ รวมถึงการสร้าง JWT
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+// src/auth/auth.service.ts
+import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { AuthDto } from './dto/auth.dto';
 import * as argon2 from 'argon2';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
-    constructor( 
+    constructor(
         private usersService: UsersService,
         private jwtService: JwtService,
+        private config: ConfigService,
     ) { }
 
-    private normalizeEmail(email: string) { //ปรับรูปแบบอีเมลให้เป็นมาตรฐาน
+    private normalizeEmail(email: string) {
         return email.trim().toLowerCase();
     }
 
-    async signUp(dto: AuthDto) { //ลงทะเบียนผู้ใช้ใหม่
-        const email = this.normalizeEmail(dto.email); //ปรับรูปแบบอีเมล
-        const userExists = await this.usersService.findByEmail(email); //ตรวจสอบว่ามีผู้ใช้ด้วยอีเมลนี้แล้วหรือไม่
-        if (userExists) throw new BadRequestException('Email นี้ถูกใช้งานแล้ว'); //ถ้ามีแล้วให้แจ้งข้อผิดพลาด
+    private async signTokens(user: { id: string; email: string; role: string }) {
+        const accessSecret = this.config.getOrThrow<string>('JWT_ACCESS_SECRET');
+        const refreshSecret = this.config.getOrThrow<string>('JWT_REFRESH_SECRET');
 
-        const passwordHash = await argon2.hash(dto.password); //แฮชรหัสผ่านเพื่อความปลอดภัย
-        // hash คือ การแปลงรหัสผ่านให้อยู่ในรูปแบบที่ไม่สามารถย้อนกลับได้
-        // ดูจาก auth.dto.ts จะเห็นได้ว่ารหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร
+        const accessExp = parseInt(this.config.get<string>('JWT_ACCESS_EXPIRATION') ?? '900', 10);
+        const refreshExp = parseInt(this.config.get<string>('JWT_REFRESH_EXPIRATION') ?? '604800', 10);
 
-        const newUser = await this.usersService.create({ //สร้างผู้ใช้ใหม่
-            email, //ใช้ email ที่ปรับรูปแบบแล้ว
-            passwordHash, //ใช้รหัสผ่านที่แฮชแล้ว
+        const payload = { sub: user.id, email: user.email, role: user.role };
+
+        const [access_token, refresh_token] = await Promise.all([
+            this.jwtService.signAsync(payload, { secret: accessSecret, expiresIn: accessExp }),
+            this.jwtService.signAsync(payload, { secret: refreshSecret, expiresIn: refreshExp }),
+        ]);
+
+        return { access_token, refresh_token };
+    }
+
+    private async storeRefreshHash(userId: string, refreshToken: string) {
+        const hash = await argon2.hash(refreshToken);
+        await this.usersService.setRefreshTokenHash(userId, hash);
+    }
+
+    async signUp(dto: AuthDto) {
+        const email = this.normalizeEmail(dto.email);
+
+        const userExists = await this.usersService.findByEmail(email);
+        if (userExists) throw new BadRequestException('Email นี้ถูกใช้งานแล้ว');
+
+        const passwordHash = await argon2.hash(dto.password);
+
+        const newUser = await this.usersService.create({
+            email,
+            passwordHash,
+            role: 'user'
         });
+        const tokens = await this.signTokens({ id: String(newUser._id), email: newUser.email, role: newUser.role });
+        await this.storeRefreshHash(String(newUser._id), tokens.refresh_token);
 
-        return this.signToken(String(newUser._id), newUser.email); //สร้าง JWT สำหรับผู้ใช้ใหม่
+        // return this.signToken(String(newUser._id), newUser.email);
+        return tokens;
     }
 
-    async signIn(dto: AuthDto) { //เข้าสู่ระบบผู้ใช้
-        const email = this.normalizeEmail(dto.email); //ปรับรูปแบบอีเมล
+    async signIn(dto: AuthDto) {
+        const email = this.normalizeEmail(dto.email);
 
-        const user = await this.usersService.findByEmailWithPassword(email); //ค้นหาผู้ใช้พร้อมรหัสผ่าน
-        if (!user) throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง'); //ถ้าไม่พบผู้ใช้ให้แจ้งข้อผิดพลาด
+        // const user = await this.usersService.findByEmailWithPassword(email);
+        const user = await this.usersService.findByEmailWithSecrets(email);
+        if (!user) throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
 
-        const passwordMatches = await argon2.verify(user.passwordHash, dto.password); //ตรวจสอบรหัสผ่าน
-        if (!passwordMatches) throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง'); //ถ้ารหัสผ่านไม่ตรงกันให้แจ้งข้อผิดพลาด
-        // argon2 คือ ไลบรารีสำหรับการแฮชและตรวจสอบรหัสผ่านอย่างปลอดภัย
+        const passwordMatches = await argon2.verify(user.passwordHash, dto.password);
+        if (!passwordMatches) throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
 
-        return this.signToken(String(user._id), user.email); //สร้าง JWT สำหรับผู้ใช้ที่เข้าสู่ระบบสำเร็จ
+        const tokens = await this.signTokens({ id: String(user._id), email: user.email, role: user.role });
+        await this.storeRefreshHash(String(user._id), tokens.refresh_token);
+
+        // return this.signToken(String(user._id), user.email);
+        return tokens;
     }
 
-    async signToken(userId: string, email: string) { //สร้าง JWT สำหรับผู้ใช้ 
-        const payload = { sub: userId, email }; //ข้อมูลที่จะเก็บใน JWT
-        const token = await this.jwtService.signAsync(payload); //สร้าง JWT
+    // async signToken(userId: string, email: string) {
+    //     const payload = { sub: userId, email };
+    //     const token = await this.jwtService.signAsync(payload);
 
-        return { //ส่งคืน JWT
-            access_token: token, //โทเค็นสำหรับการเข้าถึง
-        };
+    //     return {
+    //         access_token: token,
+    //     };
+    // }
+
+    async refreshTokens(userId: string, email: string, role: string, refreshToken: string) {
+        if (!refreshToken) throw new ForbiddenException('Access denied');
+
+        const user = await this.usersService.findByIdWithRefresh(userId);
+        if (!user?.refreshTokenHash) throw new ForbiddenException('Access denied');
+
+        const matches = await argon2.verify(user.refreshTokenHash, refreshToken);
+        if (!matches) throw new ForbiddenException('Access denied');
+
+        const tokens = await this.signTokens({ id: userId, email, role });
+
+        // Rotation: refresh token ใหม่ต้องถูกเก็บ hash ใหม่ทับตัวเก่า
+        await this.storeRefreshHash(userId, tokens.refresh_token);
+
+        return tokens;
     }
+
+    async logout(userId: string) {
+        await this.usersService.setRefreshTokenHash(userId, null);
+        return { success: true };
+    }
+
 }
